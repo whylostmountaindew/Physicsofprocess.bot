@@ -7,25 +7,28 @@ import os
 from pathlib import Path
 from flask import Flask, request
 
-# === Токен и публичный URL ===
+# === Токен, публичный URL и админ ===
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-PUBLIC_URL = os.getenv("PUBLIC_URL")  # https://physicsofprocessbot-production.up.railway.app
+PUBLIC_URL = os.getenv("PUBLIC_URL")  # пример: https://physicsofprocessbot-production.up.railway.app
+ADMIN_ID = 381592065
+SPB_PHONE = "+79899343367(Сбер)"
+
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# === Админ и СБП ===
-ADMIN_ID = 381592065
-SPB_PHONE = "+79899343367(Сбер)"
-SPB_QR = "https://ibb.co/TBPrsjBQ"
-
 # === Каталог ===
 catalog = [
-    {"id": 1, "name": "Costa Rica Tarrazu\nРегион: Зона Лос-Сантоса\nРазновидность: Местная\nОбработка: Мытая\nОбжарка: Средняя\nВо вкусе: Косточковые, Шоколад, Карамель\nQ: 84.5\nЦена: 2.700₽", "photo": "https://static.tildacdn.com/tild3661-3139-4563-a631-653362343433/__1.jpeg", "price": 2700},
-    {"id": 2, "name": "Fruto De Lobo 3.0\nРегион: Уила, Нориньо, Толима\nОбработка: Мытая\nОбжарка: Средняя\nАрабика: 40%, Робуста: 60%\nВо вкусе: Шоколад, Карамель, Изюм\nЦена: 1.800₽", "photo": "https://ibb.co/Tx6fhR2c", "price": 1800},
-    {"id": 3, "name": "Colombia Excelso\nРегион: Антиокия\nРазновидность: Местная\nОбработка: Мытая\nОбжарка: Средняя\nВо вкусе: Цитрусы, Карамель, Красные ягоды\nQ: 84.5\nЦена: 2.400₽", "photo": "https://ibb.co/My77rB40", "price": 2400},
-    {"id": 4, "name": "Brazil Santos\nРегион: Сантос\nРазновидность: Various\nОбработка: Натуральная\nОбжарка: Средняя\nВо вкусе: Орехи, Карамель, Шоколад\nQ: 83\nЦена: 2.200₽", "photo": "https://ibb.co/BVwj4D9d", "price": 2200},
-    {"id": 5, "name": "Brazil Conilon\nРегион: Montanhas do Espirito Santo\nОбработка: Полумытая(CD)\nОбжарка: Средняя\nВо вкусе: Нутелла, Орех, Темный шоколад\nQ: 83\nЦена: 2.200₽", "photo": "https://static.tildacdn.com/tild3266-3464-4035-a666-653438613539/WhatsApp_Image_2026-.jpeg", "price": 2200},
+    {"id": 1, "name": "Costa Rica Tarrazu\nРегион: Зона Лос-Сантоса\nРазновидность: Местная\nОбработка: Мытая\nОбжарка: Средняя\nВо вкусе: Косточковые, Шоколад, Карамель\nQ: 84.5\nЦена: 2.700₽",
+     "photo": "https://static.tildacdn.com/tild3661-3139-4563-a631-653362343433/__1.jpeg", "price": 2700},
+    {"id": 2, "name": "Fruto De Lobo 3.0\nРегион: Уила, Нориньо, Толима\nОбработка: Мытая\nОбжарка: Средняя\nАрабика: 40%, Робуста: 60%\nВо вкусе: Шоколад, Карамель, Изюм\nЦена: 1.800₽",
+     "photo": "https://ibb.co/Tx6fhR2c", "price": 1800},
+    {"id": 3, "name": "Colombia Excelso\nРегион: Антиокия\nРазновидность: Местная\nОбработка: Мытая\nОбжарка: Средняя\nВо вкусе: Цитрусы, Карамель, Красные ягоды\nQ: 84.5\nЦена: 2.400₽",
+     "photo": "https://ibb.co/My77rB40", "price": 2400},
+    {"id": 4, "name": "Brazil Santos\nРегион: Сантос\nРазновидность: Various\nОбработка: Натуральная\nОбжарка: Средняя\nВо вкусе: Орехи, Карамель, Шоколад\nQ: 83\nЦена: 2.200₽",
+     "photo": "https://ibb.co/BVwj4D9d", "price": 2200},
+    {"id": 5, "name": "Brazil Conilon\nРегион: Montanhas do Espirito Santo\nОбработка: Полумытая(CD)\nОбжарка: Средняя\nВо вкусе: Нутелла, Орех, Темный шоколад\nQ: 83\nЦена: 2.200₽",
+     "photo": "https://static.tildacdn.com/tild3266-3464-4035-a666-653438613539/WhatsApp_Image_2026-.jpeg", "price": 2200},
 ]
 
 # === Файл для хранения данных ===
@@ -99,10 +102,9 @@ def send_catalog_item(chat_id, index):
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     chat_id = str(call.message.chat.id)
-    data_call = call.data
     data = load_data()
+    data_call = call.data
 
-    # Переход по каталогу
     if data_call.startswith("prev_"):
         idx = int(data_call.split("_")[1]) - 1
         send_catalog_item(chat_id, idx)
@@ -115,27 +117,18 @@ def handle_callback(call):
         bot.send_message(chat_id, f"Укажите количество для «{item['name'].splitlines()[0]}»:")
         bot.register_next_step_handler(call.message, process_quantity, item_id=item["id"])
         bot.answer_callback_query(call.id)
-
-    # Очистка корзины
-    elif data_call in ["clear_confirm", "clear_cancel"]:
-        if data_call == "clear_confirm":
-            data["carts"][chat_id] = []
-            save_data(data)
-            bot.edit_message_text(
-                "Корзина очищена.",
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                reply_markup=None
-            )
-        elif data_call == "clear_cancel":
-            bot.edit_message_text(
-                "Отменено. Корзина сохранена.",
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                reply_markup=None
-            )
+    elif data_call == "clear_confirm":
+        data["carts"][chat_id] = []
+        save_data(data)
+        bot.send_message(chat_id, "Корзина очищена.", reply_markup=main_menu())
+        bot.answer_callback_query(call.id, "Корзина очищена!")
+    elif data_call == "clear_cancel":
+        bot.send_message(chat_id, "Отменено. Корзина сохранена.", reply_markup=main_menu())
+        bot.answer_callback_query(call.id, "Отмена очистки")
+    else:
         bot.answer_callback_query(call.id)
 
+# === Добавление товара в корзину ===
 def process_quantity(message, item_id):
     chat_id = str(message.chat.id)
     data = load_data()
@@ -154,13 +147,18 @@ def process_quantity(message, item_id):
         return
 
     total = item["price"] * qty
-    carts.setdefault(chat_id, []).append({"item_id": item_id, "qty": qty, "total": total})
-    save_data(data)
+    cart_list = carts.setdefault(chat_id, [])
+    existing = next((e for e in cart_list if e["item_id"] == item_id), None)
+    if existing:
+        existing["qty"] += qty
+        existing["total"] += total
+    else:
+        cart_list.append({"item_id": item_id, "qty": qty, "total": total})
 
+    save_data(data)
     bot.send_message(chat_id,
-                     f"Добавлено в корзину: {item['name'].splitlines()[0]} × {qty} = {total:,}₽".replace(",", " "),
-                     reply_markup=main_menu()
-                     )
+                     f"Добавлено в корзину: {item['name'].splitlines()[0]} × {qty} = {total}₽",
+                     reply_markup=main_menu())
 
 # === Корзина ===
 @bot.message_handler(func=lambda m: m.text == "Корзина")
@@ -179,22 +177,33 @@ def handle_cart(message):
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
         if item:
             total_sum += entry["total"]
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']:,}₽\n"
-    text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {item['price']}₽ = {entry['total']}₽\n"
+    text += f"\n*Итого:* {total_sum}₽"
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=main_menu())
 
-# === Очистка корзины кнопка ===
+# === Очистка корзины ===
 @bot.message_handler(func=lambda m: m.text == "Очистить корзину")
-def ask_clear_cart(message):
+def handle_clear_cart(message):
     chat_id = str(message.chat.id)
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("Да, очистить", callback_data="clear_confirm"))
     markup.add(types.InlineKeyboardButton("Нет, отмена", callback_data="clear_cancel"))
     bot.send_message(chat_id, "Вы уверены, что хотите очистить корзину?", reply_markup=markup)
 
-# === Оформление заказа с вводом данных ===
+# === Оптовые цены ===
+@bot.message_handler(func=lambda m: m.text == "Оптовые цены")
+def handle_wholesale(message):
+    chat_id = message.chat.id
+    pdf_path = "opt_prices.pdf"
+    if os.path.exists(pdf_path):
+        with open(pdf_path, "rb") as f:
+            bot.send_document(chat_id, f, caption="Наш прайс для оптовиков")
+    else:
+        bot.send_message(chat_id, "Файл с оптовыми ценами пока не найден.", reply_markup=main_menu())
+
+# === Оформление заказа (имя → телефон → адрес) ===
 @bot.message_handler(func=lambda m: m.text == "Оформить заказ")
-def start_checkout(message):
+def handle_checkout(message):
     chat_id = str(message.chat.id)
     bot.send_message(chat_id, "Введите ваше имя:")
     bot.register_next_step_handler(message, get_name)
@@ -202,7 +211,8 @@ def start_checkout(message):
 def get_name(message):
     chat_id = str(message.chat.id)
     data = load_data()
-    data.setdefault("user_temp_data", {})[chat_id] = {"name": message.text.strip()}
+    temp = data.setdefault("user_temp_data", {})
+    temp.setdefault(chat_id, {})["name"] = message.text.strip()
     save_data(data)
     bot.send_message(chat_id, "Введите ваш номер телефона:")
     bot.register_next_step_handler(message, get_phone)
@@ -210,7 +220,8 @@ def get_name(message):
 def get_phone(message):
     chat_id = str(message.chat.id)
     data = load_data()
-    data["user_temp_data"][chat_id]["phone"] = message.text.strip()
+    temp = data["user_temp_data"]
+    temp[chat_id]["phone"] = message.text.strip()
     save_data(data)
     bot.send_message(chat_id, "Введите ваш адрес:")
     bot.register_next_step_handler(message, get_address)
@@ -218,14 +229,16 @@ def get_phone(message):
 def get_address(message):
     chat_id = str(message.chat.id)
     data = load_data()
-    data["user_temp_data"][chat_id]["address"] = message.text.strip()
+    temp = data["user_temp_data"]
+    temp[chat_id]["address"] = message.text.strip()
     save_data(data)
-    send_order(chat_id)
+    send_order(chat_id)  # отправляем пользователю и админу
 
 def send_order(chat_id):
     data = load_data()
     cart = data.get("carts", {}).get(chat_id, [])
     temp = data.get("user_temp_data", {}).get(chat_id, {})
+
     if not cart:
         bot.send_message(chat_id, "Корзина пуста", reply_markup=main_menu())
         return
@@ -235,25 +248,18 @@ def send_order(chat_id):
     for entry in cart:
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
         if item:
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']}₽\n"
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {item['price']}₽ = {entry['total']}₽\n"
     total_sum = sum(entry["total"] for entry in cart)
     text += f"\n*Итого:* {total_sum}₽\n\n"
     text += f"Имя: {temp.get('name','')}\nТелефон: {temp.get('phone','')}\nАдрес: {temp.get('address','')}"
 
-    bot.send_message(chat_id, f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот.", reply_markup=main_menu())
-    # Отправка админу
-    bot.send_message(ADMIN_ID, text)
+    # Сообщение пользователю
+    bot.send_message(chat_id,
+                     f"Спасибо за заказ! Оплатите через СБП:\n{SPB_PHONE}\nПосле оплаты отправьте скриншот.",
+                     reply_markup=main_menu())
 
-# === Оптовые цены ===
-@bot.message_handler(func=lambda m: m.text == "Оптовые цены")
-def handle_wholesale(message):
-    chat_id = message.chat.id
-    pdf_path = "opt_prices.pdf"  # путь к твоему PDF
-    if os.path.exists(pdf_path):
-        with open(pdf_path, "rb") as f:
-            bot.send_document(chat_id, f, caption="Наш прайс для оптовиков")
-    else:
-        bot.send_message(chat_id, "Файл с оптовыми ценами пока не найден.", reply_markup=main_menu())
+    # Сообщение админу
+    bot.send_message(ADMIN_ID, text)
 
 # === Webhook Flask ===
 @app.route(f"/{TOKEN}", methods=["POST"])
