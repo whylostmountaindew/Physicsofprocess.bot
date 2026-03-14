@@ -15,7 +15,7 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # === Админ и СБП ===
-ADMIN_ID = 5314523287
+ADMIN_ID = 381592065
 SPB_PHONE = "+79899343367(Сбер)"
 SPB_QR = "https://ibb.co/TBPrsjBQ"
 
@@ -36,7 +36,7 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return {"carts": {}, "user_positions": {}, "user_steps": {}, "user_temp_data": {}}
+        return {"carts": {}, "user_positions": {}, "user_temp_data": {}}
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -166,38 +166,11 @@ def handle_cart(message):
     total_sum = 0
     for entry in cart:
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
-
         if item:
-            price = item["price"]
-            qty = entry["qty"]
-            total = entry["total"]
-
             total_sum += entry["total"]
-
-            text += f"{item['name'].splitlines()[0]} — {qty} шт. × {'price'}₽ = {total:,}₽\n"
-
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']:,}₽\n"
     text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=main_menu())
-
-# === Оформление заказа ===
-@bot.message_handler(func=lambda m: m.text == "Оформить заказ")
-def handle_checkout(message):
-    chat_id = str(message.chat.id)
-    data = load_data()
-    cart = data.get("carts", {}).get(chat_id, [])
-
-    if not cart:
-        bot.send_message(chat_id, "Корзина пуста", reply_markup=main_menu())
-        return
-
-    data.setdefault("user_steps", {})
-    data["user_steps"][chat_id] = "name"
-    save_data(data
-              )
-    bot.send_message(chat_id, "Введите ваше имя:")
-
-
-
 
 # === Очистка корзины ===
 @bot.message_handler(func=lambda m: m.text == "Очистить корзину")
@@ -219,76 +192,69 @@ def handle_wholesale(message):
     else:
         bot.send_message(chat_id, "Файл с оптовыми ценами пока не найден.", reply_markup=main_menu())
 
-@bot.message_handler(func=lambda message: True)
-def handle_steps(message):
+# === Оформление заказа с шагами ===
+@bot.message_handler(func=lambda m: m.text == "Оформить заказ")
+def handle_checkout(message):
     chat_id = str(message.chat.id)
     data = load_data()
-
-    step = data.get("user_steps", {}).get(chat_id)
-
-    if not step:
+    cart = data.get("carts", {}).get(chat_id, [])
+    if not cart:
+        bot.send_message(chat_id, "Корзина пуста", reply_markup=main_menu())
         return
 
-    data.setdefault("user_temp_data", {})
-    data["user_temp_data"].setdefault(chat_id, {})
+    bot.send_message(chat_id, "Введите ваше имя:")
+    bot.register_next_step_handler(message, get_name)
 
-    # Шаг 1 — имя
-    if step == "name":
-        data["user_temp_data"][chat_id]["name"] = message.text
-        data["user_steps"][chat_id] = "phone"
-        save_data(data)
+def get_name(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    data.setdefault("user_temp_data", {})[chat_id] = {"name": message.text}
+    save_data(data)
+    bot.send_message(chat_id, "Введите ваш номер телефона:")
+    bot.register_next_step_handler(message, get_phone)
 
-        bot.send_message(chat_id, "Введите ваш номер телефона:")
-        return
+def get_phone(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    data["user_temp_data"][chat_id]["phone"] = message.text
+    save_data(data)
+    bot.send_message(chat_id, "Введите ваш адрес:")
+    bot.register_next_step_handler(message, get_address)
 
-    # Шаг 2 — телефон
-    elif step == "phone":
-        data["user_temp_data"][chat_id]["phone"] = message.text
-        data["user_steps"][chat_id] = "address"
-        save_data(data)
+def get_address(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    data["user_temp_data"][chat_id]["address"] = message.text
+    save_data(data)
 
-        bot.send_message(chat_id, "Введите ваш адрес доставки:")
-        return
+    # Отправка заказа админу
+    order_text = format_order(chat_id, data)
+    bot.send_message(ADMIN_ID, order_text, parse_mode="Markdown")
 
-    # Шаг 3 — адрес
-    elif step == "address":
+    bot.send_message(chat_id,
+                     f"Спасибо! Ваш заказ оформлен.\nОплатите через СБП:\n{SPB_PHONE}\n\nПосле оплаты пришлите скриншот.",
+                     reply_markup=main_menu())
 
-        data["user_temp_data"][chat_id]["address"] = message.text
+# === Формирование текста заказа для админа ===
+def format_order(chat_id, data):
+    cart = data.get("carts", {}).get(str(chat_id), [])
+    if not cart:
+        return "Корзина пуста."
 
-        cart = data.get("carts", {}).get(chat_id, [])
-        user_data = data["user_temp_data"][chat_id]
+    text = "*Новый заказ*\n\n"
+    total_sum = 0
+    for entry in cart:
+        item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
+        if item:
+            total_sum += entry["total"]
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {item['price']}₽ = {entry['total']}₽\n"
+    text += f"\n*Итого:* {total_sum}₽\n\n"
 
-        text = "*Ваш заказ:*\n\n"
-        total_sum = 0
-
-        for entry in cart:
-            item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
-
-            if item:
-                price = item["price"]
-                qty = entry["qty"]
-                total = entry["total"]
-
-                total_sum += total
-
-                text += f"{item['name'].splitlines()[0]} — {qty} шт × {price}₽ = {total:,}₽\n"
-
-        text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
-
-        text += f"\n\n*Данные клиента:*"
-        text += f"\nИмя: {user_data['name']}"
-        text += f"\nТелефон: {user_data['phone']}"
-        text += f"\nАдрес: {user_data['address']}"
-
-        bot.send_message(chat_id, text, parse_mode="Markdown")
-
-        bot.send_message(
-            chat_id,
-            f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот."
-        )
-
-        data["user_steps"].pop(chat_id)
-        save_data(data)
+    user_temp = data.get("user_temp_data", {}).get(str(chat_id), {})
+    text += f"*Имя:* {user_temp.get('name', 'Не указано')}\n"
+    text += f"*Телефон:* {user_temp.get('phone', 'Не указано')}\n"
+    text += f"*Адрес:* {user_temp.get('address', 'Не указано')}"
+    return text
 
 # === Webhook Flask ===
 @app.route(f"/{TOKEN}", methods=["POST"])
