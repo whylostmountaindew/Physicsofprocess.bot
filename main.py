@@ -7,11 +7,10 @@ import os
 from pathlib import Path
 from flask import Flask, request
 
-# === Настройки ===
+# === Токен и публичный URL ===
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")  # Убедись, что токен есть в Shared Variables
-PUBLIC_URL = os.getenv("PUBLIC_URL")  # Твой публичный URL Railway
-
+TOKEN = os.getenv("BOT_TOKEN")
+PUBLIC_URL = os.getenv("PUBLIC_URL")  # https://physicsofprocessbot-production.up.railway.app
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
@@ -37,24 +36,11 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return {}
+        return {"carts": {}, "user_positions": {}, "user_steps": {}, "user_temp_data": {}}
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
-
-data = load_data()
-carts = data.get("carts", {})
-user_positions = data.get("user_positions", {})
-user_steps = data.get("user_steps", {})
-user_temp_data = data.get("user_temp_data", {})
-
-save_data({
-    "carts": carts,
-    "user_positions": user_positions,
-    "user_steps": user_steps,
-    "user_temp_data": user_temp_data
-})
 
 # === Вспомогательные функции ===
 def get_greeting():
@@ -75,7 +61,25 @@ def main_menu():
     markup.add("Оптовые цены")
     return markup
 
-# === Функции каталога ===
+# === /start ===
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    data["user_positions"][chat_id] = 0
+    save_data(data)
+    bot.send_message(chat_id, f"{get_greeting()} Чтобы заказать кофе, воспользуйтесь меню ниже",
+                     reply_markup=main_menu())
+
+# === Каталог ===
+@bot.message_handler(func=lambda m: m.text == "Каталог")
+def show_catalog(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    data["user_positions"][chat_id] = 0
+    save_data(data)
+    send_catalog_item(chat_id, 0)
+
 def send_catalog_item(chat_id, index):
     if index < 0 or index >= len(catalog):
         bot.send_message(chat_id, "Нет такого товара.")
@@ -90,6 +94,36 @@ def send_catalog_item(chat_id, index):
         markup.add(types.InlineKeyboardButton("След >>>", callback_data=f"next_{index}"))
 
     bot.send_photo(chat_id, item["photo"], caption=item["name"], reply_markup=markup)
+
+# === Callback ===
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    chat_id = str(call.message.chat.id)
+    data_call = call.data
+    data = load_data()
+
+    if data_call.startswith("prev_"):
+        idx = int(data_call.split("_")[1]) - 1
+        send_catalog_item(chat_id, idx)
+    elif data_call.startswith("next_"):
+        idx = int(data_call.split("_")[1]) + 1
+        send_catalog_item(chat_id, idx)
+    elif data_call.startswith("add_"):
+        idx = int(data_call.split("_")[1])
+        item = catalog[idx]
+        bot.send_message(chat_id, f"Укажите количество для «{item['name'].splitlines()[0]}»:")
+        bot.register_next_step_handler(call.message, process_quantity, item_id=item["id"])
+        bot.answer_callback_query(call.id)
+    elif data_call == "clear_confirm":
+        data["carts"][chat_id] = []
+        save_data(data)
+        bot.send_message(chat_id, "Корзина очищена.", reply_markup=main_menu())
+        bot.answer_callback_query(call.id, "Корзина очищена!")
+    elif data_call == "clear_cancel":
+        bot.send_message(chat_id, "Отменено. Корзина сохранена.", reply_markup=main_menu())
+        bot.answer_callback_query(call.id, "Отмена очистки")
+    else:
+        bot.answer_callback_query(call.id)
 
 def process_quantity(message, item_id):
     chat_id = str(message.chat.id)
@@ -114,32 +148,18 @@ def process_quantity(message, item_id):
 
     bot.send_message(chat_id,
                      f"Добавлено в корзину: {item['name'].splitlines()[0]} × {qty} = {total:,}₽".replace(",", " "),
-                     reply_markup=main_menu())
+                     reply_markup=main_menu()
+                     )
 
-# === Обработчики ===
-@bot.message_handler(commands=['start'])
-def handle_start(message):
-    chat_id = str(message.chat.id)
-    user_positions[chat_id] = 0
-    save_data({"carts": carts, "user_positions": user_positions, "user_steps": user_steps, "user_temp_data": user_temp_data})
-    bot.send_message(chat_id, f"{get_greeting()} Чтобы заказать кофе, воспользуйтесь меню ниже",
-                     reply_markup=main_menu())
-
-@bot.message_handler(func=lambda m: m.text == "Каталог")
-def show_catalog(message):
-    chat_id = str(message.chat.id)
-    user_positions[chat_id] = 0
-    save_data({"carts": carts, "user_positions": user_positions, "user_steps": user_steps, "user_temp_data": user_temp_data})
-    send_catalog_item(chat_id, 0)
-
+# === Корзина ===
 @bot.message_handler(func=lambda m: m.text == "Корзина")
 def handle_cart(message):
     chat_id = str(message.chat.id)
     data = load_data()
-    carts = data.setdefault("carts", {})
-    cart = carts.get(chat_id, [])
+    cart = data.get("carts", {}).get(chat_id, [])
+
     if not cart:
-        bot.send_message(chat_id, "Корзина пуста")
+        bot.send_message(chat_id, "Корзина пуста", reply_markup=main_menu())
         return
 
     text = "*Ваша корзина:*\n\n"
@@ -148,18 +168,18 @@ def handle_cart(message):
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
         if item:
             total_sum += entry["total"]
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']}₽\n"
-    text += f"\n*Итого:* {total_sum}₽"
-    bot.send_message(chat_id, text, parse_mode="Markdown")
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']:,}₽\n"
+    text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=main_menu())
 
+# === Оформление заказа ===
 @bot.message_handler(func=lambda m: m.text == "Оформить заказ")
 def handle_checkout(message):
     chat_id = str(message.chat.id)
     data = load_data()
-    carts = data.setdefault("carts", {})
-    cart = carts.get(chat_id, [])
+    cart = data.get("carts", {}).get(chat_id, [])
     if not cart:
-        bot.send_message(chat_id, "Корзина пуста")
+        bot.send_message(chat_id, "Корзина пуста", reply_markup=main_menu())
         return
 
     text = "*Ваш заказ:*\n\n"
@@ -168,41 +188,31 @@ def handle_checkout(message):
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
         if item:
             total_sum += entry["total"]
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']}₽\n"
-    text += f"\n*Итого:* {total_sum}₽"
-    bot.send_message(chat_id, text, parse_mode="Markdown")
-    bot.send_message(chat_id, f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот.")
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']:,}₽\n"
+    text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=main_menu())
+    bot.send_message(chat_id,
+                     f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот.")
 
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback(call):
-    chat_id = str(call.message.chat.id)
-    data_call = call.data
+# === Очистка корзины ===
+@bot.message_handler(func=lambda m: m.text == "Очистить корзину")
+def handle_clear_cart(message):
+    chat_id = str(message.chat.id)
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("Да, очистить", callback_data="clear_confirm"))
+    markup.add(types.InlineKeyboardButton("Нет, отмена", callback_data="clear_cancel"))
+    bot.send_message(chat_id, "Вы уверены, что хотите очистить корзину?", reply_markup=markup)
 
-    if data_call.startswith("prev_"):
-        idx = int(data_call.split("_")[1]) - 1
-        send_catalog_item(chat_id, idx)
-    elif data_call.startswith("next_"):
-        idx = int(data_call.split("_")[1]) + 1
-        send_catalog_item(chat_id, idx)
-    elif data_call.startswith("add_"):
-        idx = int(data_call.split("_")[1])
-        item = catalog[idx]
-        bot.send_message(chat_id, f"Укажите количество для «{item['name'].splitlines()[0]}»:")
-        bot.register_next_step_handler(call.message, process_quantity, item_id=item["id"])
-    elif data_call == "clear_confirm":
-        carts[chat_id] = []
-        save_data({"carts": carts, "user_positions": user_positions, "user_steps": user_steps, "user_temp_data": user_temp_data})
-        bot.send_message(chat_id, "Корзина очищена.", reply_markup=main_menu())
-        bot.answer_callback_query(call.id, "Корзина очищена!")
-    elif data_call == "clear_cancel":
-        bot.send_message(chat_id, "Отменено. Корзина сохранена.", reply_markup=main_menu())
-        bot.answer_callback_query(call.id, "Отмена очистки.")
-    bot.answer_callback_query(call.id)
+# === Оптовые цены ===
+@bot.message_handler(func=lambda m: m.text == "Оптовые цены")
+def handle_wholesale(message):
+    chat_id = str(message.chat.id)
+    bot.send_message(chat_id, "Оптовые цены уточняйте у администратора.", reply_markup=main_menu())
 
-# === Flask Webhook ===
-@app.route(f"/{TOKEN}", methods=['POST'])
+# === Webhook Flask ===
+@app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    json_str = request.get_data().decode('utf-8')
+    json_str = request.get_data().decode("utf-8")
     update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
     return "OK", 200
