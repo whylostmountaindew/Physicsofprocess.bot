@@ -2,17 +2,17 @@ import telebot
 from telebot import types
 from flask import Flask, request
 import json
-import os
-from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+import os
+from pathlib import Path
 
-# === Настройки ===
+# === Токен ===
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = "https://physicsofprocessbot-production.up.railway.app/webhook"
-
 bot = telebot.TeleBot(TOKEN)
+
+# === Flask ===
 app = Flask(__name__)
 
 # === СБП ===
@@ -182,6 +182,7 @@ def handle_cart(message):
 
     text = "*Ваша корзина:*\n\n"
     total_sum = 0
+
     for entry in cart:
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
         if item:
@@ -190,7 +191,6 @@ def handle_cart(message):
     text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
     bot.send_message(chat_id, text, parse_mode="Markdown")
 
-# === Оформление заказа ===
 @bot.message_handler(func=lambda m: m.text == "Оформить заказ")
 def handle_checkout(message):
     chat_id = str(message.chat.id)
@@ -209,25 +209,34 @@ def handle_checkout(message):
         if item:
             total_sum += entry["total"]
             text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {item['price']}₽ = {entry['total']:,}₽\n"
+
     text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
-
     bot.send_message(chat_id, text, parse_mode="Markdown")
-    bot.send_message(chat_id,
-                     f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот."
-                     )
 
-# === Webhook ===
-@app.route('/webhook', methods=['POST'])
+    bot.send_message(
+        chat_id,
+        f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот."
+    )
+
+# === Вебхук ===
+PUBLIC_URL = os.getenv("PUBLIC_URL")  # сюда добавьте: https://physicsofprocessbot-production.up.railway.app
+WEBHOOK_PATH = f"/{TOKEN}"
+
+@app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
-    json_str = request.get_data().decode('utf-8')
+    json_str = request.get_data().decode("utf-8")
     update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
-    return '', 200
+    return "OK", 200
 
-# === Запуск сервера Flask ===
+# === Главная страница для Railway ===
+@app.route("/")
+def index():
+    return "Bot is running", 200
+
 if __name__ == "__main__":
-    # Устанавливаем Webhook
+    # Устанавливаем вебхук на Telegram
     bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL)
-    # Запуск Flask
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    bot.set_webhook(url=f"{PUBLIC_URL}/{TOKEN}")
+    # Запуск Flask через Railway
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
