@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 import os
 from pathlib import Path
 from flask import Flask, request
-from telebot.apihelper import edit_message_text
 
 # === Токен и публичный URL ===
 load_dotenv()
@@ -16,7 +15,7 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # === Админ и СБП ===
-ADMIN_ID = 381592065  # мой Telegram ID
+ADMIN_ID = 381592065
 SPB_PHONE = "+79899343367(Сбер)"
 SPB_QR = "https://ibb.co/TBPrsjBQ"
 
@@ -37,7 +36,7 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return {"carts": {}, "user_positions": {}, "user_temp_data": {}}
+        return {"carts": {}, "user_positions": {}, "user_steps": {}, "user_temp_data": {}}
 
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -85,6 +84,7 @@ def send_catalog_item(chat_id, index):
     if index < 0 or index >= len(catalog):
         bot.send_message(chat_id, "Нет такого товара.")
         return
+
     item = catalog[index]
     markup = types.InlineKeyboardMarkup()
     if index > 0:
@@ -92,15 +92,17 @@ def send_catalog_item(chat_id, index):
     markup.add(types.InlineKeyboardButton("Добавить в корзину", callback_data=f"add_{index}"))
     if index < len(catalog) - 1:
         markup.add(types.InlineKeyboardButton("След >>>", callback_data=f"next_{index}"))
+
     bot.send_photo(chat_id, item["photo"], caption=item["name"], reply_markup=markup)
 
-# === Callback ===
+# === Callback для каталога и корзины ===
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     chat_id = str(call.message.chat.id)
     data_call = call.data
     data = load_data()
 
+    # Переход по каталогу
     if data_call.startswith("prev_"):
         idx = int(data_call.split("_")[1]) - 1
         send_catalog_item(chat_id, idx)
@@ -113,18 +115,27 @@ def handle_callback(call):
         bot.send_message(chat_id, f"Укажите количество для «{item['name'].splitlines()[0]}»:")
         bot.register_next_step_handler(call.message, process_quantity, item_id=item["id"])
         bot.answer_callback_query(call.id)
-    elif data_call == "clear_confirm":
-        data["carts"][chat_id] = []
-        save_data(data)
-        bot.send_message(chat_id, "Корзина очищена.", reply_markup=main_menu())
-        bot.answer_callback_query(call.id, "Корзина очищена!")
-    elif data_call == "clear_cancel":
-        bot.send_message(chat_id, "Отменено. Корзина сохранена.", reply_markup=main_menu())
-        bot.answer_callback_query(call.id, "Отмена очистки")
-    else:
+
+    # Очистка корзины
+    elif data_call in ["clear_confirm", "clear_cancel"]:
+        if data_call == "clear_confirm":
+            data["carts"][chat_id] = []
+            save_data(data)
+            bot.edit_message_text(
+                "Корзина очищена.",
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                reply_markup=None
+            )
+        elif data_call == "clear_cancel":
+            bot.edit_message_text(
+                "Отменено. Корзина сохранена.",
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                reply_markup=None
+            )
         bot.answer_callback_query(call.id)
 
-# === Добавление в корзину ===
 def process_quantity(message, item_id):
     chat_id = str(message.chat.id)
     data = load_data()
@@ -145,9 +156,11 @@ def process_quantity(message, item_id):
     total = item["price"] * qty
     carts.setdefault(chat_id, []).append({"item_id": item_id, "qty": qty, "total": total})
     save_data(data)
+
     bot.send_message(chat_id,
-                     f"Добавлено в корзину: {item['name'].splitlines()[0]} × {qty} = {total}₽",
-                     reply_markup=main_menu())
+                     f"Добавлено в корзину: {item['name'].splitlines()[0]} × {qty} = {total:,}₽".replace(",", " "),
+                     reply_markup=main_menu()
+                     )
 
 # === Корзина ===
 @bot.message_handler(func=lambda m: m.text == "Корзина")
@@ -166,129 +179,76 @@ def handle_cart(message):
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
         if item:
             total_sum += entry["total"]
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {item['price']}₽ = {entry['total']}₽\n"
-    text += f"\n*Итого:* {total_sum}₽"
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']:,}₽\n"
+    text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=main_menu())
 
-# === Оформление заказа с шагами ===
+# === Очистка корзины кнопка ===
+@bot.message_handler(func=lambda m: m.text == "Очистить корзину")
+def ask_clear_cart(message):
+    chat_id = str(message.chat.id)
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("Да, очистить", callback_data="clear_confirm"))
+    markup.add(types.InlineKeyboardButton("Нет, отмена", callback_data="clear_cancel"))
+    bot.send_message(chat_id, "Вы уверены, что хотите очистить корзину?", reply_markup=markup)
+
+# === Оформление заказа с вводом данных ===
 @bot.message_handler(func=lambda m: m.text == "Оформить заказ")
-def handle_checkout(message):
+def start_checkout(message):
+    chat_id = str(message.chat.id)
+    bot.send_message(chat_id, "Введите ваше имя:")
+    bot.register_next_step_handler(message, get_name)
+
+def get_name(message):
     chat_id = str(message.chat.id)
     data = load_data()
+    data.setdefault("user_temp_data", {})[chat_id] = {"name": message.text.strip()}
+    save_data(data)
+    bot.send_message(chat_id, "Введите ваш номер телефона:")
+    bot.register_next_step_handler(message, get_phone)
+
+def get_phone(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    data["user_temp_data"][chat_id]["phone"] = message.text.strip()
+    save_data(data)
+    bot.send_message(chat_id, "Введите ваш адрес:")
+    bot.register_next_step_handler(message, get_address)
+
+def get_address(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    data["user_temp_data"][chat_id]["address"] = message.text.strip()
+    save_data(data)
+    send_order(chat_id)
+
+def send_order(chat_id):
+    data = load_data()
     cart = data.get("carts", {}).get(chat_id, [])
+    temp = data.get("user_temp_data", {}).get(chat_id, {})
     if not cart:
         bot.send_message(chat_id, "Корзина пуста", reply_markup=main_menu())
         return
-    data["user_positions"][chat_id] = "enter_name"
-    save_data(data)
-    bot.send_message(chat_id, "Введите ваше имя:")
 
-def process_order_step(message):
-    chat_id = str(message.chat.id)
-    data = load_data()
-    step = data["user_positions"].get(chat_id)
-    user_temp = data.setdefault("user_temp_data", {}).setdefault(chat_id, {})
+    # Формируем текст заказа
+    text = "*Новый заказ:*\n\n"
+    for entry in cart:
+        item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
+        if item:
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']}₽\n"
+    total_sum = sum(entry["total"] for entry in cart)
+    text += f"\n*Итого:* {total_sum}₽\n\n"
+    text += f"Имя: {temp.get('name','')}\nТелефон: {temp.get('phone','')}\nАдрес: {temp.get('address','')}"
 
-    text = message.text.strip()
-
-    if step == "enter_name":
-        user_temp["name"] = text
-        data["user_positions"][chat_id] = "enter_phone"
-        save_data(data)
-        bot.send_message(chat_id, "Введите ваш номер телефона:")
-    elif step == "enter_phone":
-        user_temp["phone"] = text
-        data["user_positions"][chat_id] = "enter_address"
-        save_data(data)
-        bot.send_message(chat_id, "Введите ваш адрес:")
-    elif step == "enter_address":
-        user_temp["address"] = text
-        data["user_positions"][chat_id] = 0
-        save_data(data)
-
-        # Отправка заказа пользователю
-        cart = data.get("carts", {}).get(chat_id, [])
-        order_text = "*Новый заказ:*\n\n"
-        total_sum = 0
-        for entry in cart:
-            item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
-            if item:
-                total_sum += entry["total"]
-                order_text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {item['price']}₽ = {entry['total']}₽\n"
-        order_text += f"\n*Итого:* {total_sum}₽\n\n"
-        order_text += f"Имя: {user_temp['name']}\nТелефон: {user_temp['phone']}\nАдрес: {user_temp['address']}"
-
-        bot.send_message(chat_id, f"{order_text}\n\nОплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот.",
-                         reply_markup=main_menu())
-
-        # Отправка админу
-        bot.send_message(ADMIN_ID, order_text)
-
-        # Очистка корзины и временных данных
-        data["carts"][chat_id] = []
-        data["user_temp_data"][chat_id] = {}
-        save_data(data)
-
-# Регистрируем шаги
-@bot.message_handler(func=lambda m: True)
-def catch_all(message):
-    chat_id = str(message.chat.id)
-    data = load_data()
-    step = data["user_positions"].get(chat_id)
-    if step in ["enter_name", "enter_phone", "enter_address"]:
-        process_order_step(message)
-        return
-    # Любые другие сообщения можно игнорировать или отправлять меню
-    bot.send_message(chat_id, "Выберите действие в меню", reply_markup=main_menu())
-
-# === Очистка корзины ===
-@bot.message_handler(func=lambda m: m.text == "Очистить корзину")
-def ask_clear_cart(message):
-    chat_id = str(message.chat_id)
-    markup = types.InlineKeyboardMarkup()
-
-    markup.add(types.InlineKeyboardButton("Да, очистить", callback_data="clear confirm"))
-
-    markup.add(types.InlineKeyboardMarkup("Нет, отмена", callback_data= "clear_cancel" ))
-    bot.send_message(chat_id, "Вы точно хотите очистить корзину?", reply_markup=markup)
-
-    @bot.callback_query_handler(func=lambda call: call.data in ["clear_confirm", "clear_cancel"])
-    def handle_clear_callback(call):
-        chat_id = str(call.message.chat.id)
-        data = load_data()
-
-        if call.data == "clear_confirm":
-            data["carts"][chat_id] = []
-            save_data(data)
-            bot.edit_message_text("Корзина очищена.", chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
-        elif call.data == "clear_cancel":
-            bot.edit_message_text("Отменено. Корзина сохранена.", chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
-
-
-
-@bot.callback_query_handler(func = lambda call: call.data in ["clear_confirm",])
-def handle_clear_callback(call):
-    chat_id = str(call.message.chat.id)
-    data = load_data()
-
-    if call.data == "clear_confirms":
-        data["carts"][chat_id] = []
-        save_data(data)
-        bot.edited_message_text("Корзина очищена.", chat_id=chat_id, reply_markup=None)
-    elif call.data == "clear_cancel":
-
-        bot.edit_message_text("Отменено.Корзина сохранена.", chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
-
-
-
-
-
+    bot.send_message(chat_id, f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот.", reply_markup=main_menu())
+    # Отправка админу
+    bot.send_message(ADMIN_ID, text)
 
 # === Оптовые цены ===
 @bot.message_handler(func=lambda m: m.text == "Оптовые цены")
 def handle_wholesale(message):
     chat_id = message.chat.id
-    pdf_path = "opt_prices.pdf"
+    pdf_path = "opt_prices.pdf"  # путь к твоему PDF
     if os.path.exists(pdf_path):
         with open(pdf_path, "rb") as f:
             bot.send_document(chat_id, f, caption="Наш прайс для оптовиков")
