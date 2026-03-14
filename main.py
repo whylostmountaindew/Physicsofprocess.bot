@@ -166,9 +166,16 @@ def handle_cart(message):
     total_sum = 0
     for entry in cart:
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
+
         if item:
+            price = item["price"]
+            qty = entry["qty"]
+            total = entry["total"]
+
             total_sum += entry["total"]
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']:,}₽\n"
+
+            text += f"{item['name'].splitlines()[0]} — {qty} шт. × {'price'}₽ = {total:,}₽\n"
+
     text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=main_menu())
 
@@ -178,21 +185,39 @@ def handle_checkout(message):
     chat_id = str(message.chat.id)
     data = load_data()
     cart = data.get("carts", {}).get(chat_id, [])
+
     if not cart:
         bot.send_message(chat_id, "Корзина пуста", reply_markup=main_menu())
         return
 
     text = "*Ваш заказ:*\n\n"
     total_sum = 0
+
     for entry in cart:
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
+
         if item:
-            total_sum += entry["total"]
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']:,}₽\n"
+            price = item["price"]
+            qty = entry["qty"]
+            total = entry["total"]
+
+            total_sum += total
+
+            text += f"{item['name'].splitlines()[0]} — {qty} шт × {price}₽ = {total:,}₽\n"
+
     text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
-    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=main_menu())
-    bot.send_message(chat_id,
-                     f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот.")
+
+    bot.send_message(
+        chat_id,
+        text,
+        parse_mode="Markdown",
+        reply_markup=main_menu()
+    )
+
+    bot.send_message(
+        chat_id,
+        f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот."
+    )
 
 # === Очистка корзины ===
 @bot.message_handler(func=lambda m: m.text == "Очистить корзину")
