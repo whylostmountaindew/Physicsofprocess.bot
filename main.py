@@ -206,8 +206,14 @@ def handle_clear_cart(message):
 # === Оптовые цены ===
 @bot.message_handler(func=lambda m: m.text == "Оптовые цены")
 def handle_wholesale(message):
-    chat_id = str(message.chat.id)
-    bot.send_message(chat_id, "Оптовые цены уточняйте у администратора.", reply_markup=main_menu())
+    chat_id = message.chat.id
+    pdf_path = "opt_prices.pdf"  # путь к твоему PDF
+    if os.path.exists(pdf_path):
+        with open(pdf_path, "rb") as f:
+            bot.send_document(chat_id, f, caption="Наш прайс для оптовиков")
+    else:
+        bot.send_message(chat_id, "Файл с оптовыми ценами пока не найден.", reply_markup=main_menu())
+
 
 # === Webhook Flask ===
 @app.route(f"/{TOKEN}", methods=["POST"])
