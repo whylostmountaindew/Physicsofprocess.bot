@@ -190,34 +190,65 @@ def handle_checkout(message):
         bot.send_message(chat_id, "Корзина пуста", reply_markup=main_menu())
         return
 
-    text = "*Ваш заказ:*\n\n"
-    total_sum = 0
+    bot.send_message(chat_id, "Введите ваше имя:")
 
-    for entry in cart:
-        item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
+    bot.register_next_step_handler(message, get_name)
 
-        if item:
-            price = item["price"]
-            qty = entry["qty"]
-            total = entry["total"]
+    def get_name(message):
+        chat_id = str(message.chat.id)
+        data = load_data()
 
-            total_sum += total
+        data.setdefault("user_temp_data", {})
 
-            text += f"{item['name'].splitlines()[0]} — {qty} шт × {price}₽ = {total:,}₽\n"
+        data["user_temp_data"][chat_id]["name"] = message.text
+        save_data(data)
 
-    text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
+        bot.send_message(chat_id, "Введите ваш номер телефон:")
 
-    bot.send_message(
-        chat_id,
-        text,
-        parse_mode="Markdown",
-        reply_markup=main_menu()
-    )
+        bot.register_next_step_handler(message, get_phone)
 
-    bot.send_message(
-        chat_id,
-        f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот."
-    )
+        def get_phone(message):
+            chat_id = str(message.chat.id)
+            data = load_data()
+
+            data["user_temp_data"][chat_id]["phone"] = message.text
+            save_data(data)
+
+            bot.send_message(chat_id, "Введите ваш адрес для СДЭК:")
+
+            bot.register_next_step_handler(message, get_address)
+            def get_address(message):
+                chat_id = str(message.chat.id)
+                data = load_data()
+
+                data["user_temp_data"][chat_id]["address"] = message.text
+                save_data(data)
+
+                cart = data.get("carts", {}).get(chat_id, [])
+                user_data = data["user_temp_data"][chat_id]
+                text = "*Ваш заказ:*\n\n"
+                total_sum = 0
+
+                for entry in cart:
+                    item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
+                if item:
+                    price = item["price"]
+                    qty = entry["qty"]
+                    total = entry["total"]
+                    total_sum += f"{item['name'].splitlines()[0]} - {qty} шт * {price}₽ = {total:,}₽\n"
+                    text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
+
+                    text +=f"\n\n*Данные клиента:*"
+                    text += f"\nИмя: {user_data['name']}"
+                    text += f"\nТелефон: {user_data['phone']}"
+                    text += f"\nАдрес: {user_data['address']}"
+
+                    bot.send_message(chat_id, text, parse_mode="Markdown")
+
+
+                    bot.send_message(chat_id, f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скринщот.")
+
+
 
 # === Очистка корзины ===
 @bot.message_handler(func=lambda m: m.text == "Очистить корзину")
