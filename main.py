@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import os
 from pathlib import Path
 from flask import Flask, request
+from telebot.apihelper import edit_message_text
 
 # === Токен и публичный URL ===
 load_dotenv()
@@ -15,7 +16,7 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # === Админ и СБП ===
-ADMIN_ID = 5314523287  # твой Telegram ID
+ADMIN_ID = 381592065  # мой Telegram ID
 SPB_PHONE = "+79899343367(Сбер)"
 SPB_QR = "https://ibb.co/TBPrsjBQ"
 
@@ -242,12 +243,46 @@ def catch_all(message):
 
 # === Очистка корзины ===
 @bot.message_handler(func=lambda m: m.text == "Очистить корзину")
-def handle_clear_cart(message):
-    chat_id = str(message.chat.id)
+def ask_clear_cart(message):
+    chat_id = str(message.chat_id)
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("Да, очистить", callback_data="clear_confirm"))
-    markup.add(types.InlineKeyboardButton("Нет, отмена", callback_data="clear_cancel"))
-    bot.send_message(chat_id, "Вы уверены, что хотите очистить корзину?", reply_markup=markup)
+
+    markup.add(types.InlineKeyboardButton("Да, очистить", callback_data="clear confirm"))
+
+    markup.add(types.InlineKeyboardMarkup("Нет, отмена", callback_data= "clear_cancel" ))
+    bot.send_message(chat_id, "Вы точно хотите очистить корзину?", reply_markup=markup)
+
+    @bot.callback_query_handler(func=lambda call: call.data in ["clear_confirm", "clear_cancel"])
+    def handle_clear_callback(call):
+        chat_id = str(call.message.chat.id)
+        data = load_data()
+
+        if call.data == "clear_confirm":
+            data["carts"][chat_id] = []
+            save_data(data)
+            bot.edit_message_text("Корзина очищена.", chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
+        elif call.data == "clear_cancel":
+            bot.edit_message_text("Отменено. Корзина сохранена.", chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
+
+
+
+@bot.callback_query_handler(func = lambda call: call.data in ["clear_confirm",])
+def handle_clear_callback(call):
+    chat_id = str(call.message.chat.id)
+    data = load_data()
+
+    if call.data == "clear_confirms":
+        data["carts"][chat_id] = []
+        save_data(data)
+        bot.edited_message_text("Корзина очищена.", chat_id=chat_id, reply_markup=None)
+    elif call.data == "clear_cancel":
+
+        bot.edit_message_text("Отменено.Корзина сохранена.", chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
+
+
+
+
+
 
 # === Оптовые цены ===
 @bot.message_handler(func=lambda m: m.text == "Оптовые цены")
