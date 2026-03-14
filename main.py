@@ -1,37 +1,18 @@
 import telebot
 from telebot import types
-from flask import Flask, request
-import json
-from datetime import datetime
-from dotenv import load_dotenv
 import os
+import json
 from pathlib import Path
+from datetime import datetime
+from flask import Flask, request
 
-# === Токен ===
-load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
+# === Переменные окружения ===
+TOKEN = os.getenv("RAILWAY_TOKEN")
+PUBLIC_URL = os.getenv("PUBLIC_URL")  # твой публичный URL на Railway
 bot = telebot.TeleBot(TOKEN)
+server = Flask(__name__)
 
-# === Flask ===
-app = Flask(__name__)
-
-# === СБП ===
-SPB_PHONE = "+79899343367(Сбер)"
-SPB_QR = "https://ibb.co/TBPrsjBQ"
-
-# === Админ ===
-ADMIN_ID = 5314523287
-
-# === Каталог ===
-catalog = [
-    {"id": 1, "name": "Costa Rica Tarrazu\nРегион: Зона Лос-Сантоса\nРазновидность: Местная\nОбработка: Мытая\nОбжарка: Средняя\nВо вкусе: Косточковые, Шоколад, Карамель\nQ: 84.5\nЦена: 2.700₽", "photo": "https://static.tildacdn.com/tild3661-3139-4563-a631-653362343433/__1.jpeg", "price": 2700},
-    {"id": 2, "name": "Fruto De Lobo 3.0\nРегион: Уила, Нориньо, Толима\nОбработка: Мытая\nОбжарка: Средняя\nАрабика: 40%, Робуста: 60%\nВо вкусе: Шоколад, Карамель, Изюм\nЦена: 1.800₽", "photo": "https://ibb.co/Tx6fhR2c", "price": 1800},
-    {"id": 3, "name": "Colombia Excelso\nРегион: Антиокия\nРазновидность: Местная\nОбработка: Мытая\nОбжарка: Средняя\nВо вкусе: Цитрусы, Карамель, Красные ягоды\nQ: 84.5\nЦена: 2.400₽", "photo": "https://ibb.co/My77rB40", "price": 2400},
-    {"id": 4, "name": "Brazil Santos\nРегион: Сантос\nРазновидность: Various\nОбработка: Натуральная\nОбжарка: Средняя\nВо вкусе: Орехи, Карамель, Шоколад\nQ: 83\nЦена: 2.200₽", "photo": "https://ibb.co/BVwj4D9d", "price": 2200},
-    {"id": 5, "name": "Brazil Conilon\nРегион: Montanhas do Espirito Santo\nОбработка: Полумытая(CD)\nОбжарка: Средняя\nВо вкусе: Нутелла, Орех, Темный шоколад\nQ: 83\nЦена: 2.200₽", "photo": "https://static.tildacdn.com/tild3266-3464-4035-a666-653438613539/WhatsApp_Image_2026-.jpeg", "price": 2200},
-]
-
-# === Файл для хранения данных ===
+# === Данные ===
 DATA_FILE = Path(__file__).resolve().parent / "data.json"
 
 def load_data():
@@ -45,7 +26,6 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-# === Инициализация словарей ===
 data = load_data()
 carts = data.get("carts", {})
 user_positions = data.get("user_positions", {})
@@ -58,6 +38,15 @@ save_data({
     "user_steps": user_steps,
     "user_temp_data": user_temp_data
 })
+
+# === Каталог ===
+catalog = [
+    {"id": 1, "name": "Costa Rica Tarrazu\nРегион: Зона Лос-Сантоса\nРазновидность: Местная\nОбработка: Мытая\nОбжарка: Средняя\nВо вкусе: Косточковые, Шоколад, Карамель\nQ: 84.5\nЦена: 2.700₽", "photo": "https://static.tildacdn.com/tild3661-3139-4563-a631-653362343433/__1.jpeg", "price": 2700},
+    {"id": 2, "name": "Fruto De Lobo 3.0\nРегион: Уила, Нориньо, Толима\nОбработка: Мытая\nОбжарка: Средняя\nАрабика: 40%, Робуста: 60%\nВо вкусе: Шоколад, Карамель, Изюм\nЦена: 1.800₽", "photo": "https://ibb.co/Tx6fhR2c", "price": 1800},
+    {"id": 3, "name": "Colombia Excelso\nРегион: Антиокия\nРазновидность: Местная\nОбработка: Мытая\nОбжарка: Средняя\nВо вкусе: Цитрусы, Карамель, Красные ягоды\nQ: 84.5\nЦена: 2.400₽", "photo": "https://ibb.co/My77rB40", "price": 2400},
+    {"id": 4, "name": "Brazil Santos\nРегион: Сантос\nРазновидность: Various\nОбработка: Натуральная\nОбжарка: Средняя\nВо вкусе: Орехи, Карамель, Шоколад\nQ: 83\nЦена: 2.200₽", "photo": "https://ibb.co/BVwj4D9d", "price": 2200},
+    {"id": 5, "name": "Brazil Conilon\nРегион: Montanhas do Espirito Santo\nОбработка: Полумытая(CD)\nОбжарка: Средняя\nВо вкусе: Нутелла, Орех, Темный шоколад\nQ: 83\nЦена: 2.200₽", "photo": "https://static.tildacdn.com/tild3266-3464-4035-a666-653438613539/WhatsApp_Image_2026-.jpeg", "price": 2200},
+]
 
 # === Вспомогательные функции ===
 def get_greeting():
@@ -78,7 +67,7 @@ def main_menu():
     markup.add("Оптовые цены")
     return markup
 
-# === /start ===
+# === Обработка /start ===
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     chat_id = str(message.chat.id)
@@ -131,16 +120,6 @@ def handle_callback(call):
         bot.register_next_step_handler(call.message, process_quantity, item_id=item["id"])
         bot.answer_callback_query(call.id)
 
-    elif data_call == "clear_confirm":
-        carts[chat_id] = []
-        save_data({"carts": carts, "user_positions": user_positions, "user_steps": user_steps, "user_temp_data": user_temp_data})
-        bot.send_message(chat_id, "Корзина очищена.", reply_markup=main_menu())
-        bot.answer_callback_query(call.id, "Корзина очищена!")
-
-    elif data_call == "clear_cancel":
-        bot.send_message(chat_id, "Отменено. Корзина сохранена.", reply_markup=main_menu())
-        bot.answer_callback_query(call.id, "Отмена очистки.")
-
     bot.answer_callback_query(call.id)
 
 def process_quantity(message, item_id):
@@ -166,77 +145,18 @@ def process_quantity(message, item_id):
 
     bot.send_message(chat_id,
                      f"Добавлено в корзину: {item['name'].splitlines()[0]} × {qty} = {total:,}₽".replace(",", " "),
-                     reply_markup=main_menu()
-                     )
-
-# === Корзина ===
-@bot.message_handler(func=lambda m: m.text == "Корзина")
-def handle_cart(message):
-    chat_id = str(message.chat.id)
-    data = load_data()
-    carts = data.setdefault("carts",{})
-    cart = carts.get(chat_id, [])
-    if not cart:
-        bot.send_message(chat_id, "Корзина пуста")
-        return
-
-    text = "*Ваша корзина:*\n\n"
-    total_sum = 0
-
-    for entry in cart:
-        item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
-        if item:
-            total_sum += entry["total"]
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']:,}₽\n"
-    text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
-    bot.send_message(chat_id, text, parse_mode="Markdown")
-
-@bot.message_handler(func=lambda m: m.text == "Оформить заказ")
-def handle_checkout(message):
-    chat_id = str(message.chat.id)
-    data = load_data()
-    carts = data.setdefault("carts", {})
-    cart = carts.get(chat_id, [])
-
-    if not cart:
-        bot.send_message(chat_id, "Корзина пуста")
-        return
-
-    text = "*Ваш заказ:*\n\n"
-    total_sum = 0
-    for entry in cart:
-        item = next((product for product in catalog if product["id"] == entry["item_id"]), None)
-        if item:
-            total_sum += entry["total"]
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {item['price']}₽ = {entry['total']:,}₽\n"
-
-    text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
-    bot.send_message(chat_id, text, parse_mode="Markdown")
-
-    bot.send_message(
-        chat_id,
-        f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот."
-    )
+                     reply_markup=main_menu())
 
 # === Вебхук ===
-PUBLIC_URL = os.getenv("PUBLIC_URL")  # сюда добавьте: https://physicsofprocessbot-production.up.railway.app
-WEBHOOK_PATH = f"/{TOKEN}"
-
-@app.route(WEBHOOK_PATH, methods=["POST"])
+@server.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     json_str = request.get_data().decode("utf-8")
     update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
-    return "OK", 200
+    return "!", 200
 
-# === Главная страница для Railway ===
-@app.route("/")
-def index():
-    return "Bot is running", 200
-
+# === Запуск ===
 if __name__ == "__main__":
-    # Устанавливаем вебхук на Telegram
     bot.remove_webhook()
     bot.set_webhook(url=f"{PUBLIC_URL}/{TOKEN}")
-    # Запуск Flask через Railway
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    server.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
