@@ -1,15 +1,19 @@
 import telebot
 from telebot import types
-from datetime import datetime
-from dotenv import load_dotenv
+from flask import Flask, request
+import json
 import os
 from pathlib import Path
-import json
+from datetime import datetime
+from dotenv import load_dotenv
 
-# === Токен ===
+# === Настройки ===
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = "https://physicsofprocessbot-production.up.railway.app/webhook"
+
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
 # === СБП ===
 SPB_PHONE = "+79899343367(Сбер)"
@@ -32,20 +36,28 @@ DATA_FILE = Path(__file__).resolve().parent / "data.json"
 
 def load_data():
     try:
-        with open(DATA_FILE, "r") as f:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return {"carts": {}, "user_positions": {}, "user_steps": {}, "user_temp_data": {}}
+        return {}
 
 def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f)
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
+# === Инициализация словарей ===
 data = load_data()
-carts = data["carts"]
-user_positions = data["user_positions"]
-user_steps = data["user_steps"]
-user_temp_data = data["user_temp_data"]
+carts = data.get("carts", {})
+user_positions = data.get("user_positions", {})
+user_steps = data.get("user_steps", {})
+user_temp_data = data.get("user_temp_data", {})
+
+save_data({
+    "carts": carts,
+    "user_positions": user_positions,
+    "user_steps": user_steps,
+    "user_temp_data": user_temp_data
+})
 
 # === Вспомогательные функции ===
 def get_greeting():
@@ -114,8 +126,10 @@ def handle_callback(call):
     elif data_call.startswith("add_"):
         idx = int(data_call.split("_")[1])
         item = catalog[idx]
+
         bot.send_message(chat_id, f"Укажите количество для «{item['name'].splitlines()[0]}»:")
-        bot.register_next_step_handler_by_chat_id(chat_id, process_quantity, item_id=item["id"])
+        bot.register_next_step_handler(call.message, process_quantity, item_id=item["id"])
+        bot.answer_callback_query(call.id)
 
     elif data_call == "clear_confirm":
         carts[chat_id] = []
@@ -131,11 +145,13 @@ def handle_callback(call):
 
 def process_quantity(message, item_id):
     chat_id = str(message.chat.id)
+    data = load_data()
+    carts = data.setdefault("carts", {})
     text = message.text.strip()
 
     if not text.isdigit():
         bot.send_message(chat_id, "Введите целое число.")
-        bot.register_next_step_handler_by_chat_id(chat_id, process_quantity, item_id=item_id)
+        bot.register_next_step_handler(message, process_quantity, item_id)
         return
 
     qty = int(text)
@@ -146,16 +162,19 @@ def process_quantity(message, item_id):
 
     total = item["price"] * qty
     carts.setdefault(chat_id, []).append({"item_id": item_id, "qty": qty, "total": total})
-    save_data({"carts": carts, "user_positions": user_positions, "user_steps": user_steps, "user_temp_data": user_temp_data})
+    save_data(data)
 
     bot.send_message(chat_id,
                      f"Добавлено в корзину: {item['name'].splitlines()[0]} × {qty} = {total:,}₽".replace(",", " "),
-                     reply_markup=main_menu())
+                     reply_markup=main_menu()
+                     )
 
 # === Корзина ===
 @bot.message_handler(func=lambda m: m.text == "Корзина")
 def handle_cart(message):
     chat_id = str(message.chat.id)
+    data = load_data()
+    carts = data.setdefault("carts",{})
     cart = carts.get(chat_id, [])
     if not cart:
         bot.send_message(chat_id, "Корзина пуста")
@@ -167,12 +186,48 @@ def handle_cart(message):
         item = next((i for i in catalog if i["id"] == entry["item_id"]), None)
         if item:
             total_sum += entry["total"]
-            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {item['price']}₽ = {entry['total']:,}₽\n"
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {entry['price']}₽ = {entry['total']:,}₽\n"
     text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
     bot.send_message(chat_id, text, parse_mode="Markdown")
 
-# === Остальной код (оформление заказа, оптовые цены и т.д.) остаётся без изменений ===
+# === Оформление заказа ===
+@bot.message_handler(func=lambda m: m.text == "Оформить заказ")
+def handle_checkout(message):
+    chat_id = str(message.chat.id)
+    data = load_data()
+    carts = data.setdefault("carts", {})
+    cart = carts.get(chat_id, [])
 
-# === Запуск ===
+    if not cart:
+        bot.send_message(chat_id, "Корзина пуста")
+        return
+
+    text = "*Ваш заказ:*\n\n"
+    total_sum = 0
+    for entry in cart:
+        item = next((product for product in catalog if product["id"] == entry["item_id"]), None)
+        if item:
+            total_sum += entry["total"]
+            text += f"{item['name'].splitlines()[0]} — {entry['qty']} шт. × {item['price']}₽ = {entry['total']:,}₽\n"
+    text += f"\n*Итого:* {total_sum:,}₽".replace(",", " ")
+
+    bot.send_message(chat_id, text, parse_mode="Markdown")
+    bot.send_message(chat_id,
+                     f"Оплатите заказ через СБП:\n{SPB_PHONE}\n\nПосле оплаты отправьте скриншот."
+                     )
+
+# === Webhook ===
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    json_str = request.get_data().decode('utf-8')
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return '', 200
+
+# === Запуск сервера Flask ===
 if __name__ == "__main__":
-    bot.infinity_polling()
+    # Устанавливаем Webhook
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    # Запуск Flask
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
